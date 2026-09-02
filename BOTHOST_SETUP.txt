@@ -1,0 +1,14 @@
+MAGNITKA BOT 1 — BOTHOST.RU
+
+Важное:
+1) Токен Telegram НЕ записывайте в файлы и НЕ загружайте на GitHub.
+2) В Bothost при создании Telegram-бота вставьте токен от BotFather в поле Bot Token.
+3) В дополнительных настройках включите «Использовать собственный Dockerfile».
+4) Git URL — URL вашего GitHub-репозитория; ветка main.
+5) Главный файл при собственном Dockerfile можно оставить пустым: Dockerfile запускает python -m app.main.
+6) В переменные окружения добавьте:
+   DB_PATH=/app/data/magnitka_bot.sqlite3
+   GOALIE_SEED_PATH=seed/goalie_seed_august_2026.json
+   TOURNAMENT_TZ=Asia/Yekaterinburg
+7) После успешного запуска откройте своего Telegram-бота и нажмите Start / отправьте /start.
+8) Для проверки отправьте /status и /today.
