@@ -33,9 +33,49 @@ class GoalEvent:
     def is_goal(self) -> bool:
         if self.score_after is None:
             return False
-        # Numeric score means the scoreboard changed. A naked "ШБ" is not a goal.
         import re
         return bool(re.search(r"\d+\s*:\s*\d+", self.score_after))
+
+    @property
+    def period_elapsed_seconds(self) -> int | None:
+        """Convert MG Open's usually-continuous 0:00..30:00 clock to local period seconds.
+
+        Historical protocols normally report P2 as 10:xx..19:xx and P3 as 20:xx..29:xx.
+        Some pages can already contain a local 0:xx..9:xx value, so both forms are accepted.
+        Impossible/anomalous values are ignored for live clock anchoring.
+        """
+        if not isinstance(self.period, int) or self.absolute_seconds is None:
+            return None
+        sec = self.absolute_seconds
+        if not 0 <= sec <= 30 * 60:
+            return None
+        if self.period == 1:
+            return sec if sec <= 10 * 60 else None
+        if self.period == 2:
+            if 10 * 60 <= sec <= 20 * 60:
+                return sec - 10 * 60
+            if 0 <= sec <= 10 * 60:
+                return sec
+            return None
+        if self.period == 3:
+            if 20 * 60 <= sec <= 30 * 60:
+                return sec - 20 * 60
+            if 0 <= sec <= 10 * 60:
+                return sec
+            return None
+        return None
+
+    @property
+    def signature(self) -> str:
+        return "|".join(
+            [
+                str(self.period),
+                str(self.raw_time or ""),
+                str(self.score_after or ""),
+                str(self.team or ""),
+                str(self.author or ""),
+            ]
+        )
 
 
 @dataclass(slots=True)
@@ -74,8 +114,6 @@ class GameSnapshot:
         score = self._period_score_from_events(1)
         if score is not None:
             return score
-        # A completed scoreless first period has no goal rows at all. Once the page says
-        # break-after-P1 / P2 / P3 / finished, absence of P1 goal events means 0:0.
         if self.break_after_period == 1 or self.live_period in (2, 3) or self.finished:
             return (0, 0)
         return None

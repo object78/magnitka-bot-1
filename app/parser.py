@@ -167,6 +167,7 @@ def _parse_rosters(soup: BeautifulSoup) -> dict[str, list[Player]]:
 
 def _detect_live_phase(soup: BeautifulSoup, text: str) -> tuple[int | None, int | None, int | None]:
     low = text.lower()
+    raw_html = str(soup)
     break_after = None
     if "перерыв" in low:
         if re.search(r"перерыв[^.]{0,30}(?:после\s*)?(?:1|перв)", low):
@@ -174,8 +175,6 @@ def _detect_live_phase(soup: BeautifulSoup, text: str) -> tuple[int | None, int 
         elif re.search(r"перерыв[^.]{0,30}(?:после\s*)?(?:2|втор)", low):
             break_after = 2
         else:
-            # In this bot only break after P1 matters. If P2 events have not appeared yet,
-            # this is a reasonable conservative guess; final signal is still gated by P2 detection.
             break_after = 1
 
     live_period = None
@@ -190,13 +189,46 @@ def _detect_live_phase(soup: BeautifulSoup, text: str) -> tuple[int | None, int 
             live_period = int(m.group(1))
             break
 
-    # Search timer-looking elements only; never use arbitrary page HH:MM because the page contains schedule times.
+    # Some versions of the page keep live state in hidden data-* attributes / inline JSON.
+    if live_period is None:
+        for tag in soup.find_all(True):
+            for key, value in tag.attrs.items():
+                k = str(key).lower().replace("-", "_")
+                if k not in {"data_current_period", "data_live_period", "data_game_period", "current_period", "live_period"}:
+                    continue
+                value = " ".join(value) if isinstance(value, list) else str(value)
+                m = re.search(r"\b([123])\b", value)
+                if m:
+                    live_period = int(m.group(1))
+                    break
+            if live_period is not None:
+                break
+    if live_period is None:
+        for pat in (
+            r'["\'](?:current[_-]?period|live[_-]?period|game[_-]?period)["\']\s*[:=]\s*["\']?([123])',
+            r'\b(?:currentPeriod|livePeriod|gamePeriod)\s*[:=]\s*["\']?([123])',
+        ):
+            m = re.search(pat, raw_html, re.I)
+            if m:
+                live_period = int(m.group(1))
+                break
+
     elapsed = None
-    timer_candidates = []
+    timer_candidates: list[str] = []
     for tag in soup.find_all(True):
         ident = " ".join([str(tag.get("id", "")), " ".join(tag.get("class", []))]).lower()
         if any(k in ident for k in ("timer", "clock", "match-time", "game-time", "period-time")):
             timer_candidates.append(normalize(tag.get_text(" ", strip=True)))
+        for key, value in tag.attrs.items():
+            k = str(key).lower().replace("-", "_")
+            if any(x in k for x in ("period_time", "game_time", "match_time", "timer", "clock")):
+                timer_candidates.append(" ".join(value) if isinstance(value, list) else str(value))
+    for pat in (
+        r'["\'](?:period[_-]?time|game[_-]?time|match[_-]?time|timer|clock)["\']\s*[:=]\s*["\'](\d{1,2}:\d{2})',
+        r'\b(?:periodTime|gameTime|matchTime)\s*[:=]\s*["\'](\d{1,2}:\d{2})',
+    ):
+        for m in re.finditer(pat, raw_html, re.I):
+            timer_candidates.append(m.group(1))
     for candidate in timer_candidates:
         sec = parse_clock(candidate)
         if sec is not None and sec <= 10 * 60:

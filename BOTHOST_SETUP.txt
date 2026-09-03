@@ -1,14 +1,34 @@
-MAGNITKA BOT 1 — BOTHOST.RU
+MAGNITKA BOT 1 — BOTHOST.RU — LIVE FIX v2
 
-Важное:
-1) Токен Telegram НЕ записывайте в файлы и НЕ загружайте на GitHub.
-2) В Bothost при создании Telegram-бота вставьте токен от BotFather в поле Bot Token.
-3) В дополнительных настройках включите «Использовать собственный Dockerfile».
-4) Git URL — URL вашего GitHub-репозитория; ветка main.
-5) Главный файл при собственном Dockerfile можно оставить пустым: Dockerfile запускает python -m app.main.
-6) В переменные окружения добавьте:
+ОБЯЗАТЕЛЬНО ПОСЛЕ СКРИНШОТА ЛОГОВ:
+1) Перевыпустите Telegram Bot Token через @BotFather.
+2) Новый токен сохраните только в Bothost, не в GitHub.
+3) В v2 логи httpx отключены на INFO, поэтому полный Telegram API URL с токеном больше не печатается.
+
+Для Bothost:
+1) Использовать собственный Dockerfile.
+2) Git URL — ваш GitHub-репозиторий; ветка main.
+3) Главный файл оставить пустым — Dockerfile запускает python -m app.main.
+4) Постоянные переменные:
    DB_PATH=/app/data/magnitka_bot.sqlite3
    GOALIE_SEED_PATH=seed/goalie_seed_august_2026.json
    TOURNAMENT_TZ=Asia/Yekaterinburg
-7) После успешного запуска откройте своего Telegram-бота и нажмите Start / отправьте /start.
-8) Для проверки отправьте /status и /today.
+5) Опциональные live-параметры (значения уже стоят по умолчанию):
+   LIVE_POLL_SECONDS=5
+   P2_DEFAULT_OFFSET_SECONDS=900
+   P2_PREP_LEAD_SECONDS=60
+6) После обновления кода нужен НОВЫЙ ДЕПЛОЙ/пересборка, а не только Restart.
+7) База /app/data/magnitka_bot.sqlite3 сохранится между обновлениями.
+8) После запуска проверить команды:
+   /status
+   /today
+   /debug
+
+Что изменено в live v2:
+- запрос страницы игры с cache-busting параметром и no-cache headers;
+- распознавание скрытых data-* / inline live-period и timer полей;
+- перевод официального непрерывного времени событий: P2 10:29 => 00:29 периода;
+- если появляется новое событие P2, бот вычисляет фактическое начало P2 и калибрует следующие игры дня;
+- до калибровки резервная оценка P2 = старт матча + 15 минут;
+- A+ и IT-L2 получают подготовительное сообщение около начала P2;
+- /debug показывает, откуда бот взял время P2: explicit-timer / new-p2-event / day-calibration / default-estimate.

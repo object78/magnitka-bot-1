@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import date
 from zoneinfo import ZoneInfo
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -24,13 +26,24 @@ class MagnitkaSource:
             headers={
                 "User-Agent": "MagnitkaBot1/0.1 (+personal Telegram monitor; low request rate)",
                 "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.5",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
             },
         )
 
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def _get(self, url: str) -> str:
+    @staticmethod
+    def _fresh_url(url: str) -> str:
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query["_mb"] = str(int(time.time() * 1000))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+    async def _get(self, url: str, fresh: bool = False) -> str:
+        if fresh:
+            url = self._fresh_url(url)
         last: Exception | None = None
         for attempt in range(3):
             try:
@@ -44,8 +57,8 @@ class MagnitkaSource:
         assert last is not None
         raise last
 
-    async def fetch_game(self, url: str) -> GameSnapshot:
-        html = await self._get(url)
+    async def fetch_game(self, url: str, fresh: bool = False) -> GameSnapshot:
+        html = await self._get(url, fresh=fresh)
         return parse_game_page(html, url, self.tournament_tz)
 
     async def discover_games_for_date(self, target: date) -> list[GameSnapshot]:

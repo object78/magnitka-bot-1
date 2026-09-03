@@ -1,0 +1,11 @@
+Magnitka Bot v3.2 — automatic bet result notifications
+
+Changes:
+- Every live/prematch betting signal is automatically followed by a result when its market is settled.
+- Result message contains only: PASSED / NOT PASSED, strategy, tier, match, market and relevant final score.
+- No ruble profit/loss is shown in result messages.
+- Win rate and ROI are NEVER appended automatically to betting or result notifications.
+- Win rate and ROI are available only through /stats.
+- ROI is percentage-based using minimum signal odds; user's stake size does not affect the percentage.
+- Historical seeded bets are marked as already result-notified, so deploying v3.2 does not spam old September results.
+- Persistent databases are migrated automatically with a result_notified flag.

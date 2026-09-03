@@ -42,16 +42,30 @@ def aplus_candidate(game: GameSnapshot, first_two_total: int | None) -> Strategy
     )
 
 
-def it_candidate(game: GameSnapshot) -> StrategyCandidate | None:
+def it_candidate(game: GameSnapshot, assume_p1_complete: bool = False) -> StrategyCandidate | None:
     if FOXES not in (game.team1, game.team2) or not game.team1 or not game.team2:
         return None
+    opp = game.team2 if game.team1 == FOXES else game.team1
     p1 = game.p1_score()
+
+    # Against Hedgehogs the tested rule does not depend on the P1 score at all,
+    # so we can prepare the user before P2 even when the web page does not expose a break state.
+    if opp == HEDGEHOGS and p1 is None:
+        return StrategyCandidate(
+            strategy="IT-L2 v5", game_id=game.game_id, base_score=3,
+            base_reason="IT vs Ежи CORE+", min_odds=1.60,
+            market="ИТБ0,5 Хитрых Лис во 2-м периоде", opponent=opp,
+            foxes_state_after_p1="unknown",
+        )
+
+    if p1 is None and assume_p1_complete:
+        p1 = (0, 0)
     if p1 is None:
         return None
+
     foxes_goals = p1[0] if game.team1 == FOXES else p1[1]
     opp_goals = p1[1] if game.team1 == FOXES else p1[0]
     state = "lead" if foxes_goals > opp_goals else "trail" if foxes_goals < opp_goals else "draw"
-    opp = game.team2 if game.team1 == FOXES else game.team1
 
     if opp == HEDGEHOGS:
         base, reason = 3, "IT vs Ежи CORE+"

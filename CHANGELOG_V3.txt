@@ -1,0 +1,22 @@
+Magnitka Telegram Bot v3 — Paid Access + Performance
+====================================================
+- Closed access: /start without invite grants nothing.
+- Owner-only admin via OWNER_TELEGRAM_ID.
+- One-time invite links for 7/14/30 day subscriptions.
+- Invite activation window configurable with INVITE_VALID_HOURS (24h default).
+- Automatic subscription expiry; expired users stop receiving broadcasts at exact expiry.
+- 24h expiry reminder.
+- Owner commands: /invite7 /invite14 /invite30 /users /extend /revoke.
+- User read-only commands: /stats /subscription.
+- Actual bet signals are persisted to SQLite and automatically settled.
+- Rolling 7-day and 30-day win rate + ROI, overall and per strategy.
+- Compact 7/30 performance footer on new actual bet signals.
+- ROI uses signal minimum odds and FLAT_STAKE, not user's actual bookmaker price.
+- Live Fix v2 retained.
+
+v3.1 — September history seed
+- Added seed/bet_history_september_2026.json with 9 confirmed actual bets from 01-03.09.2026.
+- SKIP and no-entry candidates are excluded.
+- Import uses the same event_key format as live signals and INSERT OR IGNORE, so redeploy/restart does not duplicate bets.
+- Initial September stats after import: 9 bets, 3-6, win rate 33.3%, P/L -4600 at flat 1000, ROI -51.1%.
+- Strategy split: M3 0-3 ROI -100%; A+ 2-0 ROI +40%; IT-L2 1-3 ROI -60%.
