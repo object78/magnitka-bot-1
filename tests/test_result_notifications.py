@@ -57,3 +57,23 @@ def test_result_message_has_no_money_stats_or_roi():
     assert "ROI" not in text
     assert "₽" not in text
     assert "проход" not in text.lower()
+
+
+def test_result_message_hides_internal_strategy_name():
+    from app.monitor import Monitor
+    from app.models import GameSnapshot
+    m = Monitor.__new__(Monitor)
+    bet = {
+        "result": "W", "strategy": "IT-L2 v5", "tier": "ULTRA",
+        "team1": "Хитрые Лисы", "team2": "Свирепые Ежи",
+        "market": "ИТБ0,5 Хитрых Лис во 2-м периоде"
+    }
+    g = GameSnapshot(1, "", None, 4, None, "Хитрые Лисы", "Свирепые Ежи", "", period_scores=[(0,3),(1,0)])
+    # _trusted_p2_score needs only the snapshot for a finished-period score.
+    g.break_after_period = 2
+    text = m._result_message(bet, g)
+    assert "IT-L2" not in text
+    assert "A+" not in text
+    assert "M3" not in text
+    assert "СТАВКА ПРОШЛА | ULTRA" in text
+    assert "Рынок: ИТБ0,5 Хитрых Лис во 2-м периоде" in text

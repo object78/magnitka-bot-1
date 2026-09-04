@@ -39,6 +39,11 @@ class Config:
     p2_prep_lead_seconds: int
     p2_offset_min_seconds: int
     p2_offset_max_seconds: int
+    pari_enabled: bool = True
+    pari_base_url: str = "https://pari.ru"
+    pari_discovery_path: str = "/live/hockey/country/russia"
+    pari_refresh_seconds: float = 3.0
+    manual_prep_lead_seconds: int = 10
 
     @property
     def tournament_tz(self) -> ZoneInfo:
@@ -79,4 +84,9 @@ class Config:
             p2_prep_lead_seconds=int(os.getenv("P2_PREP_LEAD_SECONDS", "60")),
             p2_offset_min_seconds=int(os.getenv("P2_OFFSET_MIN_SECONDS", "600")),
             p2_offset_max_seconds=int(os.getenv("P2_OFFSET_MAX_SECONDS", "1800")),
+            pari_enabled=_bool("PARI_ENABLED", True),
+            pari_base_url=os.getenv("PARI_BASE_URL", "https://pari.ru").rstrip("/"),
+            pari_discovery_path=os.getenv("PARI_DISCOVERY_PATH", "/live/hockey/country/russia"),
+            pari_refresh_seconds=float(os.getenv("PARI_REFRESH_SECONDS", "3")),
+            manual_prep_lead_seconds=int(os.getenv("MANUAL_PREP_LEAD_SECONDS", "10")),
         )

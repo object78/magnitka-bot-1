@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from .config import Config
 from .monitor import Monitor
+from .pari import PariLiveSource
 from .source import MagnitkaSource
 from .storage import Storage
 from .telegram import TelegramGateway
@@ -27,6 +28,11 @@ async def amain() -> None:
         timeout=cfg.request_timeout_seconds,
         candidate_limit=cfg.calendar_candidate_limit,
     )
+    pari = PariLiveSource(
+        base_url=cfg.pari_base_url,
+        discovery_path=cfg.pari_discovery_path,
+        timeout=cfg.request_timeout_seconds,
+    ) if cfg.pari_enabled else None
     telegram = TelegramGateway(
         cfg.telegram_token,
         storage,
@@ -35,14 +41,16 @@ async def amain() -> None:
         display_tz=cfg.tournament_tz,
     )
     await telegram.initialize()
-    monitor = Monitor(cfg, source, storage, telegram)
+    monitor = Monitor(cfg, source, storage, telegram, pari=pari)
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(monitor.run())
-            tg.create_task(telegram.poll_commands(monitor.status_text, monitor.today_text, monitor.debug_text))
+            tg.create_task(telegram.poll_commands(monitor.status_text, monitor.today_text, monitor.debug_text, monitor.pari_text))
     finally:
         await telegram.close()
         await source.close()
+        if pari:
+            await pari.close()
         storage.close()
 
 

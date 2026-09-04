@@ -1,0 +1,9 @@
+Magnitka Bot v3.4 — Manual PREP fallback
+
+- Yellow A+/IT-L2 ГОТОВИМСЯ can be sent even when PARI live is unavailable.
+- Fallback uses learned/default expected P2 wall-clock start and fires about 10 seconds before it.
+- This fallback NEVER authorizes СТАВКА СЕЙЧАС. Actual bet signals still require real live period clock + score.
+- A+ PREP explicitly tells user to manually watch 4:50 P2 if live signal is missed.
+- IT-L2 PREP explicitly tells user to manually watch 1:00 P2 if live signal is missed.
+- For IT vs Spartans/Axes, P1-dependent rules still must be confirmed before PREP; no invented P1 score.
+- New env: MANUAL_PREP_LEAD_SECONDS=10.

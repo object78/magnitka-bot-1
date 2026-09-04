@@ -1,0 +1,9 @@
+v3.4 safety behavior
+
+1. A+/IT preliminary strategy conditions are checked as before.
+2. If PARI/mg-open live clock works, PREP uses live state.
+3. If live clock is missing, bot estimates P2 start from same-day calibration or fallback offset.
+4. About 10 seconds before that expected start it sends ГОТОВИМСЯ.
+5. User should open bookmaker and watch 1:00 (IT-L2) or 4:50 (A+) manually.
+6. BET NOW is NOT sent from an estimate. It requires a real live timer and a trusted P2 score.
+7. Therefore a broken PARI feed can cause a missed automated BET NOW, but should no longer leave the user unprepared.

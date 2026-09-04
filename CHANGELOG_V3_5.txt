@@ -1,0 +1,7 @@
+Magnitka Bot v3.5 — PARI discovery fix
+
+1. Fixed PARI discovery: Magnitka Open is under Hockey -> Russia, not Cyberhockey.
+2. Default PARI_DISCOVERY_PATH is now /live/hockey/country/russia.
+3. Added automatic fallback to /live/hockey/country/russia even if BotHost still contains the old cyberhockey env value.
+4. Live safety from v3.4 remains: estimated time may send PREP only; BET NOW requires trusted live timer + score.
+5. /pari and /debug remain available for owner verification.

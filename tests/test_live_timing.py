@@ -48,3 +48,25 @@ def test_new_p2_event_anchors_period_start(tmp_path):
     assert start == datetime(2026, 9, 3, 12, 16, 0, tzinfo=TZ)
     assert source == "new-p2-event"
     storage.close()
+
+
+def test_manual_prep_fallback_10_seconds_before_estimated_p2(tmp_path):
+    storage = Storage(tmp_path / "db.sqlite3")
+    m = Monitor(cfg(tmp_path), Dummy(), storage, Dummy())
+    g = snapshot([])
+    # No PARI row, no mg-open live timer. Default P2 start is scheduled + 15 min.
+    m.now = lambda: datetime(2026, 9, 3, 12, 14, 50, tzinfo=TZ)
+    assert m._near_p2_start(g) is True
+    assert "расчётное начало 2П" in m._prep_clock_source(g)
+    # Safety PREP does not create a fake live clock for a bet decision.
+    assert m._period_elapsed(g) is None
+    storage.close()
+
+
+def test_manual_prep_fallback_not_too_early(tmp_path):
+    storage = Storage(tmp_path / "db.sqlite3")
+    m = Monitor(cfg(tmp_path), Dummy(), storage, Dummy())
+    g = snapshot([])
+    m.now = lambda: datetime(2026, 9, 3, 12, 14, 40, tzinfo=TZ)
+    assert m._near_p2_start(g) is False
+    storage.close()

@@ -85,7 +85,7 @@ class TelegramGateway:
             "/extend ID 7|14|30 — продлить\n"
             "/revoke ID — отозвать доступ\n"
             "/stats — статистика 7/30 дней\n"
-            "/status /today /debug — технические команды\n"
+            "/status /today /debug /pari — технические команды\n"
             "/myid — показать ваш Telegram ID"
         )
 
@@ -168,6 +168,7 @@ class TelegramGateway:
         status_provider: Callable[[], str],
         today_provider: Callable[[], str],
         debug_provider: Callable[[], str],
+        pari_provider: Callable[[], str],
     ) -> None:
         while True:
             try:
@@ -278,6 +279,8 @@ class TelegramGateway:
                             await self.send(chat_id, today_provider())
                         elif command == "/debug":
                             await self.send(chat_id, debug_provider())
+                        elif command == "/pari":
+                            await self.send(chat_id, pari_provider())
                         elif command == "/mute":
                             self.storage.set_subscriber_enabled(chat_id, False)
                             await self.send(chat_id, "🔕 Уведомления владельца выключены. /unmute — включить.")

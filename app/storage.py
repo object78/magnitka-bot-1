@@ -360,7 +360,7 @@ class Storage:
                 f"ROI {p['roi']*100:+.1f}%"
             )
 
-        names = [("M3", "M3-TB4.5"), ("A+", "A+ v4"), ("IT-L2", "IT-L2 v5")]
+        names = [("ТБ4.5 ПРЕМАТЧ", "M3-TB4.5"), ("ТБ0.5 LIVE", "A+ v4"), ("ИТБ0.5", "IT-L2 v5")]
         blocks = ["📊 Статистика сигналов"]
         for days, title in ((7, "Последние 7 дней"), (30, "Последние 30 дней")):
             blocks.append("\n" + title)

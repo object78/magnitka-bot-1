@@ -178,3 +178,26 @@ pytest -q
 
 
 V3.2: После каждого фактического сигнала бот автоматически присылает итог ✅ СТАВКА ПРОШЛА / ❌ СТАВКА НЕ ПРОШЛА. Денежный P/L, процент выигрышей и ROI в автоматических сообщениях не показываются. Статистика — только /stats.
+
+## v3.3: PARI live clock
+
+Live strategies A+ and IT-L2 now use PARI as the primary trusted live clock/score source. The bot discovers the current Magnitka Open 3x10 daytime tournament automatically and reads the accumulated 0:00..30:00 clock. For example, PARI 10:45 means 00:45 of period 2; PARI 14:50 means 04:50 of period 2.
+
+Safety rule: a schedule estimate is no longer sufficient to send `СТАВКА СЕЙЧАС`. If the trusted live source is unavailable at the decision point, the live signal is skipped rather than guessed.
+
+Owner diagnostics:
+- `/pari` — PARI URL, current match clock, period, score and reconstructed P1/P2.
+- `/debug` — PARI + mg-open side-by-side diagnostic state.
+
+Environment variables (defaults are already built in):
+- `PARI_ENABLED=true`
+- `PARI_BASE_URL=https://pari.ru`
+- `PARI_DISCOVERY_PATH=/live/hockey/country/russia`
+- `PARI_REFRESH_SECONDS=3`
+
+
+## v3.4 — manual PREP fallback
+
+If PARI/mg-open does not expose a usable live clock, the bot may still send the yellow `ГОТОВИМСЯ` message about 10 wall-clock seconds before the estimated start of period 2. The estimate uses a learned same-day P2 start offset when available, otherwise the configured default. This fallback is only a human safety alert. `СТАВКА СЕЙЧАС` still requires a real live clock and score and is never emitted from the estimate.
+
+Set `MANUAL_PREP_LEAD_SECONDS=10` to change the lead time.

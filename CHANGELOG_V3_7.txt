@@ -1,0 +1,7 @@
+Magnitka Bot v3.7 — neutral public live clock
+
+1. Public betting/prep messages no longer display the bookmaker/source name in LIVE clock.
+2. Example: LIVE clock: 14:50 (2П 4:50), not LIVE clock: PARI 14:50 (...).
+3. If mg-open provides the trusted timer, public output is likewise neutral: LIVE clock: 2П 4:50.
+4. Owner-only /pari and /debug diagnostics are unchanged so the owner can still see which technical source is working.
+5. Strategy logic, subscription access, statistics and settlement are unchanged.

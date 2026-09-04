@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import median
 
 from .config import Config
 from .models import GameSnapshot, ScoredSignal
+from .pari import PariLiveSnapshot, PariLiveSource
 from .source import MagnitkaSource
 from .storage import Storage
 from .strategy import FOXES, HEDGEHOGS, aplus_candidate, it_candidate, m3_candidate, score_candidate
@@ -27,11 +28,14 @@ class Watch:
 
 
 class Monitor:
-    def __init__(self, cfg: Config, source: MagnitkaSource, storage: Storage, telegram: TelegramGateway):
+    def __init__(self, cfg: Config, source: MagnitkaSource, storage: Storage, telegram: TelegramGateway, pari: PariLiveSource | None = None):
         self.cfg = cfg
         self.source = source
         self.storage = storage
         self.telegram = telegram
+        self.pari = pari
+        self.pari_rows: list[PariLiveSnapshot] = []
+        self._pari_last_refresh: datetime | None = None
         self.games: dict[int, GameSnapshot] = {}
         self.last_schedule_refresh: datetime | None = None
         self.watches: dict[tuple[int, str], Watch] = {}
@@ -57,17 +61,66 @@ class Monitor:
     def debug_text(self) -> str:
         now = self.now()
         lines = [f"🧪 LIVE debug {now:%d.%m %H:%M:%S} (Магнитогорск)"]
+        if self.pari:
+            lines.append(f"PARI: {'OK' if self.pari_rows else 'нет live-строк'}; url={self.pari.tournament_url or '?'}; error={self.pari.last_error or '-'}")
         for g in self._today_games():
-            start, source = self._p2_start_info(g)
-            p1 = g.p1_score()
-            p2 = g.p2_score()
-            start_txt = start.strftime("%H:%M:%S") if start else "?"
+            pg = self._pari_for_game(g)
+            if pg:
+                clock = self._fmt_clock(pg.total_elapsed_seconds)
+                local = self._fmt_clock(pg.period_elapsed_seconds)
+                lines.append(
+                    f"№{g.match_no} id={g.game_id} {g.team1}—{g.team2}\n"
+                    f" PARI: P={pg.period}; match={clock}; local={local}; score={pg.score}; P1={pg.p1_score}; P2={pg.p2_score}\n"
+                    f" MG: status={g.status_text}; liveP={g.live_period}; timer={g.live_elapsed_seconds}; events={len(g.events)}"
+                )
+            else:
+                lines.append(
+                    f"№{g.match_no} id={g.game_id} {g.team1}—{g.team2}\n"
+                    f" PARI: нет совпадения; MG: status={g.status_text}; liveP={g.live_period}; timer={g.live_elapsed_seconds}; events={len(g.events)}"
+                )
+        return "\n".join(lines)
+
+    def pari_text(self) -> str:
+        lines = ["📡 PARI live"]
+        if not self.pari:
+            return "📡 PARI отключён."
+        lines.append(f"URL: {self.pari.tournament_url or '?'}")
+        if self.pari.last_error:
+            lines.append(f"Ошибка: {self.pari.last_error}")
+        if not self.pari_rows:
+            lines.append("Live-матчи Магнитки сейчас не распознаны.")
+            return "\n".join(lines)
+        for r in self.pari_rows:
             lines.append(
-                f"№{g.match_no} id={g.game_id} {g.team1}—{g.team2}\n"
-                f" status={g.status_text}; liveP={g.live_period}; timer={g.live_elapsed_seconds}; "
-                f"P1={p1}; P2={p2}; events={len(g.events)}; P2start≈{start_txt} [{source}]"
+                f"{r.team1} — {r.team2}: {self._fmt_clock(r.total_elapsed_seconds)} | "
+                f"P{r.period or '?'} {self._fmt_clock(r.period_elapsed_seconds)} | счёт {r.score} | P1 {r.p1_score} | P2 {r.p2_score}"
             )
         return "\n".join(lines)
+
+    @staticmethod
+    def _fmt_clock(sec: int | None) -> str:
+        if sec is None:
+            return "?"
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    def _pari_for_game(self, game: GameSnapshot) -> PariLiveSnapshot | None:
+        for row in getattr(self, "pari_rows", []):
+            oriented = row.oriented(game.team1, game.team2)
+            if oriented is not None:
+                return oriented
+        return None
+
+    async def _refresh_pari_live(self, force: bool = False) -> None:
+        if not self.pari or not self.cfg.pari_enabled:
+            return
+        now = self.now()
+        if (not force and self._pari_last_refresh and
+                (now - self._pari_last_refresh).total_seconds() < self.cfg.pari_refresh_seconds):
+            return
+        games = self._today_games()
+        day_no = next((g.day_no for g in games if g.day_no is not None), None)
+        self.pari_rows = await self.pari.fetch_live(day_no=day_no)
+        self._pari_last_refresh = now
 
     async def _notify_once(self, key: str, text: str) -> None:
         if self.storage.notified(key):
@@ -239,41 +292,98 @@ class Monitor:
                 context = f"\nПервые 2 матча: {first2} голов" + (" (≥10 TEST/BOOST)" if first2 >= 10 else "")
             await self._notify_bet_once(
                 f"{now.date()}:M3:{game.game_id}:pregame",
-                f"🔴 M3 — {sig.tier}\n"
+                f"🔴 СТАВКА | {sig.tier}\n"
                 f"№3 {game.scheduled_at:%H:%M} | {game.team1} — {game.team2}\n\n"
                 f"СТАВКА: {cand.market}\nБрать от: {cand.min_odds:.2f}\n"
-                f"База: {cand.base_reason}\nGK proxy: {self._fmt_proxy(sig)}"
+                f"GK proxy: {self._fmt_proxy(sig)}"
                 + (" → BOOST" if sig.gk_boost else "") + context,
                 game, sig,
             )
 
-    def _period_elapsed(self, game: GameSnapshot) -> int | None:
-        now = self.now()
+    def _trusted_p1_score(self, game: GameSnapshot) -> tuple[int, int] | None:
+        pg = self._pari_for_game(game)
+        if pg and pg.period in (2, 3) and pg.p1_score is not None:
+            return pg.p1_score
+        return game.p1_score() if (game.break_after_period == 1 or game.live_period in (2, 3) or game.finished) else None
+
+    def _trusted_p2_score(self, game: GameSnapshot) -> tuple[int, int] | None:
+        pg = self._pari_for_game(game)
+        if pg and pg.period in (2, 3) and pg.p2_score is not None:
+            return pg.p2_score
         if game.live_period == 2 and game.live_elapsed_seconds is not None:
-            return game.live_elapsed_seconds
-        start, _ = self._p2_start_info(game)
-        if start and now >= start:
-            return max(0, int((now - start).total_seconds()))
+            return game.p2_score()
+        if game.live_period == 3 or game.break_after_period == 2 or game.finished:
+            return game.p2_score()
         return None
 
+    def _fox_p2_goals(self, game: GameSnapshot) -> int | None:
+        p2 = self._trusted_p2_score(game)
+        if p2 is None or FOXES not in (game.team1, game.team2):
+            return None
+        return p2[0] if game.team1 == FOXES else p2[1]
+
+    def _game_for_it(self, game: GameSnapshot) -> GameSnapshot:
+        p1 = self._trusted_p1_score(game)
+        if p1 is None:
+            return game
+        # it_candidate reads P1 from GameSnapshot; inject trusted PARI P1 without mutating the stored MG snapshot.
+        return replace(game, period_scores=[p1])
+
+    def _period_elapsed(self, game: GameSnapshot) -> int | None:
+        # Live betting decisions must use a real clock. Never fall back to schedule estimates.
+        pg = self._pari_for_game(game)
+        if pg and pg.period == 2 and pg.period_elapsed_seconds is not None:
+            return pg.period_elapsed_seconds
+        if game.live_period == 2 and game.live_elapsed_seconds is not None:
+            return game.live_elapsed_seconds
+        return None
+
+    def _live_clock_source(self, game: GameSnapshot) -> str:
+        pg = self._pari_for_game(game)
+        if pg and pg.period is not None and pg.period_elapsed_seconds is not None:
+            return f"{self._fmt_clock(pg.total_elapsed_seconds)} (2П {self._fmt_clock(pg.period_elapsed_seconds)})" if pg.period == 2 else f"{self._fmt_clock(pg.total_elapsed_seconds)}"
+        if game.live_period is not None and game.live_elapsed_seconds is not None:
+            return f"{game.live_period}П {self._fmt_clock(game.live_elapsed_seconds)}"
+        return "нет надёжного live-таймера"
+
     def _near_p2_start(self, game: GameSnapshot) -> bool:
-        now = self.now()
+        # PREP is intentionally more permissive than BET NOW.
+        # If a real live source is available, use it. If not, allow a manual-safety
+        # PREP notification from the learned/default wall-clock estimate of P2 start.
+        # Actual betting decisions in _run_watches still require a real live clock.
+        pg = self._pari_for_game(game)
+        if pg:
+            if pg.period == 1 and pg.period_elapsed_seconds is not None:
+                return pg.period_elapsed_seconds >= max(0, 10 * 60 - self.cfg.p2_prep_lead_seconds)
+            if pg.period == 2 and pg.period_elapsed_seconds is not None:
+                return pg.period_elapsed_seconds <= 25
         if game.break_after_period == 1:
             return True
-        if game.live_period == 2 and (game.live_elapsed_seconds is None or game.live_elapsed_seconds <= 20):
+        if game.live_period == 2 and game.live_elapsed_seconds is not None and game.live_elapsed_seconds <= 20:
             return True
+
+        # Manual fallback: approximately N wall-clock seconds before expected P2 start.
+        # This path is ONLY for the yellow PREP message, never for BET NOW.
         start, _ = self._p2_start_info(game)
-        if not start:
+        if start is None:
             return False
-        delta = (start - now).total_seconds()
-        return -20 <= delta <= self.cfg.p2_prep_lead_seconds
+        delta = (start - self.now()).total_seconds()
+        return -20 <= delta <= self.cfg.manual_prep_lead_seconds
+
+    def _prep_clock_source(self, game: GameSnapshot) -> str:
+        source = self._live_clock_source(game)
+        if source != "нет надёжного live-таймера":
+            return source
+        start, kind = self._p2_start_info(game)
+        if start is None:
+            return "ручной контроль времени в БК"
+        return f"расчётное начало 2П ~{start:%H:%M:%S} ({kind}); LIVE не подтверждён"
 
     def _p1_complete_enough(self, game: GameSnapshot) -> bool:
-        if game.break_after_period == 1 or game.live_period in (2, 3) or game.finished:
+        pg = self._pari_for_game(game)
+        if pg and pg.period in (2, 3) and pg.p1_score is not None:
             return True
-        start, source = self._p2_start_info(game)
-        # An event/explicit anchor is enough. A pure default estimate is not trusted for Axes/Spartans P1-state rules.
-        return bool(start and self.now() >= start and source not in {"default-estimate"})
+        return bool(game.break_after_period == 1 or game.live_period in (2, 3) or game.finished)
 
     async def _prep_period_watches(self) -> None:
         first2 = self._first_two_total()
@@ -288,21 +398,23 @@ class Monitor:
                 watch = self.watches.setdefault(key, Watch(ac.strategy, game.game_id, 4 * 60 + 50))
                 if near and not watch.prep_sent:
                     sig = self._score(ac, game)
-                    start, source = self._p2_start_info(game)
+                    source = self._prep_clock_source(game)
                     await self._notify_once(
                         f"{self.now().date()}:{game.game_id}:Aplus:prep",
-                        f"🟡 A+ — ГОТОВИМСЯ | {sig.tier}\n"
+                        f"🟡 ГОТОВИМСЯ | {sig.tier}\n"
                         f"{game.team1} — {game.team2}\n"
                         f"Все предварительные условия выполнены.\n\n"
                         f"Ждём 0:0 во 2П до 4:50.\n"
                         f"Если 0:0 сохранится → {ac.market} от {ac.min_odds:.2f}.\n"
                         f"GK proxy: {self._fmt_proxy(sig)}" + (" → BOOST" if sig.gk_boost else "")
-                        + f"\nLIVE clock: {source}",
+                        + f"\nLIVE clock: {source}\n"
+                        f"🛟 Если 🚨 СТАВКА СЕЙЧАС не придёт, открой БК и контролируй 4:50 второго периода вручную.",
                     )
                     watch.prep_sent = True
 
             # Hedgehogs do not depend on the P1 score, so candidate may be known before the break.
-            raw_ic = it_candidate(game, assume_p1_complete=self._p1_complete_enough(game))
+            it_game = self._game_for_it(game)
+            raw_ic = it_candidate(it_game, assume_p1_complete=self._p1_complete_enough(game))
             if raw_ic:
                 # For Axes/Spartans do not act on a partial P1 score before the period is actually complete.
                 if raw_ic.opponent != HEDGEHOGS and not self._p1_complete_enough(game):
@@ -311,17 +423,18 @@ class Monitor:
                 watch = self.watches.setdefault(key, Watch(raw_ic.strategy, game.game_id, 60))
                 if near and not watch.prep_sent:
                     sig = self._score(raw_ic, game)
-                    _, source = self._p2_start_info(game)
+                    source = self._prep_clock_source(game)
                     await self._notify_once(
                         f"{self.now().date()}:{game.game_id}:IT:prep",
-                        f"🟡 IT-L2 — ГОТОВИМСЯ | {sig.tier}\n"
+                        f"🟡 ГОТОВИМСЯ | {sig.tier}\n"
                         f"{game.team1} — {game.team2}\n"
                         f"Предварительные условия выполнены.\n\n"
                         f"Ждём до 1:00 второго периода.\n"
                         f"Если Лисы ещё не забьют → {raw_ic.market} от {raw_ic.min_odds:.2f}.\n"
-                        f"Важно: гол соперника не отменяет IT-L2.\n"
+                        f"Важно: гол соперника не отменяет условие ставки.\n"
                         f"GK proxy соперника: {self._fmt_proxy(sig)}" + (" → BOOST" if sig.gk_boost else "")
-                        + f"\nLIVE clock: {source}",
+                        + f"\nLIVE clock: {source}\n"
+                        f"🛟 Если 🚨 СТАВКА СЕЙЧАС не придёт, открой БК и контролируй 1:00 второго периода вручную.",
                     )
                     watch.prep_sent = True
 
@@ -347,17 +460,14 @@ class Monitor:
                 if not cand:
                     watch.done = True
                     continue
-                p2 = game.p2_score()
-                # Exact event clock has priority for cancellation.
-                early_p2_goal = any(
-                    e.period == 2 and e.is_goal and e.period_elapsed_seconds is not None
-                    and e.period_elapsed_seconds <= watch.target_seconds for e in game.events
-                )
-                if early_p2_goal or (sum(p2) > 0 and elapsed < watch.target_seconds):
+                p2 = self._trusted_p2_score(game)
+                if p2 is None:
+                    continue
+                if sum(p2) > 0 and elapsed < watch.target_seconds:
                     if self.cfg.send_cancel_messages:
                         await self._notify_once(
                             f"{self.now().date()}:{game.game_id}:Aplus:cancel",
-                            f"⚪ A+ — ОТМЕНА\n{game.team1} — {game.team2}\n"
+                            f"⚪ ОТМЕНА\n{game.team1} — {game.team2}\n"
                             f"Во 2П есть гол до точки 4:50. Ставки нет.",
                         )
                     watch.done = True
@@ -370,17 +480,17 @@ class Monitor:
                 ):
                     await self._notify_once(
                         f"{self.now().date()}:{game.game_id}:Aplus:warning",
-                        f"🟠 A+ — {self.cfg.target_warning_seconds} сек до проверки\n"
+                        f"🟠 {self.cfg.target_warning_seconds} сек до проверки\n"
                         f"2П пока 0:0. Подготовь рынок ТБ0,5 2П.",
                     )
                     watch.warning_sent = True
                 if elapsed >= watch.target_seconds:
-                    if sum(game.p2_score()) == 0:
+                    if sum(p2) == 0:
                         sig = self._score(cand, game)
-                        _, source = self._p2_start_info(game)
+                        source = self._live_clock_source(game)
                         await self._notify_bet_once(
                             f"{self.now().date()}:{game.game_id}:Aplus:bet",
-                            f"🚨 A+ — СТАВКА СЕЙЧАС | {sig.tier}\n"
+                            f"🚨 СТАВКА СЕЙЧАС | {sig.tier}\n"
                             f"{game.team1} — {game.team2}\n"
                             f"2П: ~4:50 | счёт периода 0:0\n\n"
                             f"➡️ {cand.market}\nБрать от: {cand.min_odds:.2f}\n"
@@ -391,21 +501,18 @@ class Monitor:
                     watch.done = True
 
             elif watch.strategy == "IT-L2 v5":
-                cand = it_candidate(game, assume_p1_complete=True)
+                cand = it_candidate(self._game_for_it(game), assume_p1_complete=True)
                 if not cand:
                     watch.done = True
                     continue
-                early_fox_goal = any(
-                    e.period == 2 and e.is_goal and e.team == FOXES
-                    and e.period_elapsed_seconds is not None and e.period_elapsed_seconds <= watch.target_seconds
-                    for e in game.events
-                )
-                fox_goals = game.p2_goals_for(FOXES)
-                if early_fox_goal or (fox_goals > 0 and elapsed < watch.target_seconds):
+                fox_goals = self._fox_p2_goals(game)
+                if fox_goals is None:
+                    continue
+                if fox_goals > 0 and elapsed < watch.target_seconds:
                     if self.cfg.send_cancel_messages:
                         await self._notify_once(
                             f"{self.now().date()}:{game.game_id}:IT:cancel",
-                            f"⚪ IT-L2 — ОТМЕНА\n{game.team1} — {game.team2}\n"
+                            f"⚪ ОТМЕНА\n{game.team1} — {game.team2}\n"
                             f"Хитрые Лисы забили во 2П до 1:00. Ставки нет.",
                         )
                     watch.done = True
@@ -418,17 +525,17 @@ class Monitor:
                 ):
                     await self._notify_once(
                         f"{self.now().date()}:{game.game_id}:IT:warning",
-                        f"🟠 IT-L2 — {self.cfg.target_warning_seconds} сек до проверки\n"
+                        f"🟠 {self.cfg.target_warning_seconds} сек до проверки\n"
                         f"Лисы пока без гола во 2П. Подготовь ИТБ0,5 Лис 2П.",
                     )
                     watch.warning_sent = True
                 if elapsed >= watch.target_seconds:
-                    if game.p2_goals_for(FOXES) == 0:
+                    if fox_goals == 0:
                         sig = self._score(cand, game)
-                        _, source = self._p2_start_info(game)
+                        source = self._live_clock_source(game)
                         await self._notify_bet_once(
                             f"{self.now().date()}:{game.game_id}:IT:bet",
-                            f"🚨 IT-L2 — СТАВКА СЕЙЧАС | {sig.tier}\n"
+                            f"🚨 СТАВКА СЕЙЧАС | {sig.tier}\n"
                             f"{game.team1} — {game.team2}\n"
                             f"2П: ~1:00 | Лисы: 0 голов в периоде\n\n"
                             f"➡️ {cand.market}\nБрать от: {cand.min_odds:.2f}\n"
@@ -439,6 +546,9 @@ class Monitor:
                     watch.done = True
 
     def _p2_ended(self, game: GameSnapshot) -> bool:
+        pg = self._pari_for_game(game)
+        if pg and pg.period == 3:
+            return True
         if game.finished or game.live_period == 3 or game.break_after_period == 2:
             return True
         if len(game.period_scores) >= 3:
@@ -452,7 +562,8 @@ class Monitor:
         strategy = str(bet["strategy"])
         tier = str(bet["tier"] or "")
         teams = f"{bet['team1'] or '?'} — {bet['team2'] or '?'}"
-        lines = [f"{icon} {title}", f"{strategy}" + (f" • {tier}" if tier else ""), teams, f"Рынок: {bet['market']}"]
+        heading = f"{icon} {title}" + (f" | {tier}" if tier else "")
+        lines = [heading, teams, f"Рынок: {bet['market']}"]
 
         if game is not None:
             if strategy == "M3-TB4.5":
@@ -462,7 +573,7 @@ class Monitor:
                 if total is not None:
                     lines.append(f"Тотал 3П: {total}")
             elif strategy in ("A+ v4", "IT-L2 v5"):
-                p2 = game.p2_score()
+                p2 = self._trusted_p2_score(game) or game.p2_score()
                 lines.append(f"Счёт 2П: {p2[0]}:{p2[1]}")
 
         # No money, win rate or ROI here. Those are available only through /stats.
@@ -481,18 +592,25 @@ class Monitor:
                 continue
             strategy = str(bet["strategy"])
             if strategy == "M3-TB4.5":
-                if not game.finished:
-                    continue
-                total = game.total_regulation_goals()
+                total = None
+                if game.finished:
+                    total = game.total_regulation_goals()
+                else:
+                    pg = self._pari_for_game(game)
+                    # At 30:00 the three regulation periods are complete; overtime/bullets do not change TB4.5 regulation total.
+                    if pg and pg.total_elapsed_seconds is not None and pg.total_elapsed_seconds >= 30 * 60 and pg.score is not None:
+                        total = sum(pg.score)
                 if total is not None:
                     self.storage.settle_bet(str(bet["event_key"]), total >= 5, self.now())
             elif strategy == "A+ v4":
-                if sum(game.p2_score()) > 0:
+                p2 = self._trusted_p2_score(game)
+                if p2 is not None and sum(p2) > 0:
                     self.storage.settle_bet(str(bet["event_key"]), True, self.now())
                 elif self._p2_ended(game):
                     self.storage.settle_bet(str(bet["event_key"]), False, self.now())
             elif strategy == "IT-L2 v5":
-                if game.p2_goals_for(FOXES) > 0:
+                fox_goals = self._fox_p2_goals(game)
+                if fox_goals is not None and fox_goals > 0:
                     self.storage.settle_bet(str(bet["event_key"]), True, self.now())
                 elif self._p2_ended(game):
                     self.storage.settle_bet(str(bet["event_key"]), False, self.now())
@@ -572,6 +690,7 @@ class Monitor:
 
                 await self._maybe_send_day_start()
                 await self._refresh_relevant_games()
+                await self._refresh_pari_live()
                 await self._m3_pregame()
                 await self._prep_period_watches()
                 await self._run_watches()

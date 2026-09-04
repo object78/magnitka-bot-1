@@ -1,0 +1,16 @@
+Magnitka Bot v3.3 — PARI live clock integration
+
+1. mg-open remains the source for official schedule, rosters, goalie pairs and final protocol.
+2. PARI public live pages are used as the trusted live source for:
+   - accumulated match clock (0:00..30:00),
+   - current period,
+   - current match score,
+   - P1/P2 score reconstruction.
+3. A+ and IT-L2 no longer use schedule-estimated P2 time for BET NOW decisions.
+   If PARI (or an explicit MG live timer) is unavailable, the bot does NOT send a live betting signal.
+4. PARI tournament URL is discovered automatically each day from the live cyberhockey category page by tournament day number.
+5. New owner command /pari shows exactly what the bot currently reads from PARI.
+6. /debug now displays PARI and mg-open side by side.
+7. P2 result settlement can use PARI immediately; M3 can settle at 30:00 regulation using PARI score, while mg-open remains the official fallback.
+8. Subscription/invite system, /stats 7/30 days, September seed history, and automatic ✅/❌ result notifications are preserved.
+9. Tests: 23/23 passed locally.
